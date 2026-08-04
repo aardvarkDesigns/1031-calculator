@@ -6,6 +6,11 @@ Reads an .xlsx file with 'Property ID', 'Sale Price', 'Sale Date', and
 new Property IDs are inserted, existing ones are updated in place. Run this
 locally, then commit + push properties.db to deploy the refresh to Railway.
 
+If the sheet also has 'Address', 'Property City', and/or 'Prop Zip' columns,
+those are imported too (property_address / city / zip_code) and shown at
+the top of the calculator page. They're optional -- a sheet without them
+still imports fine, just without an address to display.
+
 By default, rows removed from the spreadsheet are left alone in the database.
 Pass --sync to also delete any property whose Property ID is no longer in
 the spreadsheet -- use this when properties have been intentionally dropped
@@ -38,6 +43,10 @@ from models import Property, get_session, init_db
 
 MAX_ROWS = 4000
 REQUIRED_COLUMNS = ("Property ID", "Sale Price", "Sale Date", "Current Value")
+
+# Read in when present but not required -- older/other source spreadsheets
+# may not have these columns, and the calculator works fine without them.
+OPTIONAL_COLUMNS = ("Address", "Property City", "Prop Zip")
 
 # Assumed loan-to-value ratio when the actual down payment is unknown. 75%
 # LTV (25% down) is a common baseline for investment-property financing.
@@ -149,6 +158,24 @@ def estimate_mortgage(
     return mortgage_amount, mortgage_rate, sale_date
 
 
+def parse_optional_str(value: object) -> str | None:
+    """Convert an optional text/number cell to a stripped string, or None.
+
+    Args:
+        value: Raw cell value, which may be a string, number, or None.
+
+    Returns:
+        The stripped string, or None if the cell is empty. Whole-number
+        floats (e.g. a zip code read as 89119.0) are rendered without the
+        trailing ".0".
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 def read_rows(xlsx_path: Path, sheet_name: str | None) -> list[dict]:
     """Read and validate the source spreadsheet into plain dict rows.
 
@@ -157,7 +184,8 @@ def read_rows(xlsx_path: Path, sheet_name: str | None) -> list[dict]:
         sheet_name: Sheet to read, or None to use the active sheet.
 
     Returns:
-        One dict per data row, keyed by the required column names.
+        One dict per data row, keyed by the required column names plus
+        whichever OPTIONAL_COLUMNS are present in the sheet.
 
     Raises:
         SystemExit: If a required column is missing from the sheet.
@@ -171,6 +199,8 @@ def read_rows(xlsx_path: Path, sheet_name: str | None) -> list[dict]:
         sys.exit(f"Error: sheet '{sheet.title}' is missing required column(s): {missing}")
 
     col_index = {name: header.index(name) for name in REQUIRED_COLUMNS}
+    col_index.update({name: header.index(name) for name in OPTIONAL_COLUMNS if name in header})
+
     rows = []
     for row in sheet.iter_rows(min_row=2, values_only=True):
         rows.append({name: row[idx] for name, idx in col_index.items()})
@@ -206,12 +236,18 @@ def upsert_properties(
             sale_price = parse_currency(row["Sale Price"])
             sale_date = parse_sale_date(row["Sale Date"])
             current_value = parse_currency(row["Current Value"])
+            property_address = parse_optional_str(row.get("Address"))
+            city = parse_optional_str(row.get("Property City"))
+            zip_code = parse_optional_str(row.get("Prop Zip"))
 
             existing = session.query(Property).filter_by(property_id=property_id).first()
             if existing:
                 existing.sale_price = sale_price
                 existing.sale_date = sale_date
                 existing.current_home_value = current_value
+                existing.property_address = property_address
+                existing.city = city
+                existing.zip_code = zip_code
                 existing.updated_at = datetime.utcnow()
                 target = existing
                 updated += 1
@@ -221,6 +257,9 @@ def upsert_properties(
                     sale_price=sale_price,
                     sale_date=sale_date,
                     current_home_value=current_value,
+                    property_address=property_address,
+                    city=city,
+                    zip_code=zip_code,
                 )
                 session.add(target)
                 inserted += 1

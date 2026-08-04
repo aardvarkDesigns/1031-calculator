@@ -100,6 +100,14 @@ def calculator(request):
     current_value = property_data.current_home_value if property_data and property_data.current_home_value else 621000
     current_year = datetime.now().year
 
+    # Combine street address with city/zip when available, e.g.
+    # "4419 Spencer ST, Las Vegas 89119". Any of the three parts may be
+    # missing on older data, so build it up from whatever's on file.
+    address_display = None
+    if property_data and property_data.property_address:
+        city_zip = " ".join(filter(None, [property_data.city, property_data.zip_code]))
+        address_display = ", ".join(filter(None, [property_data.property_address, city_zip]))
+
     return Html(
         Head(
             Meta(charset="UTF-8"),
@@ -113,6 +121,7 @@ def calculator(request):
                 .header { background: linear-gradient(135deg, #2557FF 0%, #508AFF 100%); color: white; padding: 40px 30px; text-align: center; }
                 .header h1 { font-size: 32px; font-weight: 700; margin-bottom: 10px; }
                 .header p { font-size: 16px; font-weight: 400; opacity: 0.95; }
+                .header .property-address { font-size: 16px; font-weight: 500; opacity: 0.95; margin-top: 10px; }
                 .content { padding: 40px 30px; }
                 .error-message { background: #fee2e2; border: 2px solid #fca5a5; border-left: 5px solid #dc2626; color: #991b1b; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
                 .input-section { background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 8px; padding: 30px; margin-bottom: 40px; border-left: 5px solid #2557FF; }
@@ -153,6 +162,7 @@ def calculator(request):
                 Div(
                     H1("1031 Exchange Calculator"),
                     P("Compare selling vs. executing a 1031 exchange for your property"),
+                    (P(address_display, cls="property-address") if address_display else ""),
                     cls="header"
                 ),
                 Div(
@@ -162,7 +172,7 @@ def calculator(request):
                         H2("Property Information"),
                         Div(
                             Div(Label("Purchase Price", for_="purchasePrice"), Input(type="number", id="purchasePrice", value=purchase_price, step="1000"), Span("Original price paid for property", cls="help-text"), cls="input-group"),
-                            Div(Label("Mortgage Pay Off", for_="mortgagePayoff"), Input(type="number", id="mortgagePayoff", value=calculated_mortgage, step="1000"), Span("Outstanding loan balance", cls="help-text"), cls="input-group"),
+                            Div(Label("Estimated Mortgage Pay Off", for_="mortgagePayoff"), Input(type="number", id="mortgagePayoff", value=calculated_mortgage, step="1000"), Span("Outstanding loan balance", cls="help-text"), cls="input-group"),
                             Div(Label("Current Value", for_="currentValue"), Input(type="number", id="currentValue", value=current_value, step="1000"), Span("Today's market value", cls="help-text"), cls="input-group"),
                             Div(Label("Cost to Sell (%)", for_="costToSell"), Input(type="number", id="costToSell", value="6", step="0.5", min="0", max="50"), Span("", id="costToSellError", cls="help-text"), cls="input-group"),
                             cls="input-grid"
@@ -269,7 +279,7 @@ def calculator(request):
                     document.getElementById('replacement-count').textContent = numProperties.toString();
                     document.getElementById('replacement-totalMortgage').textContent = formatCurrency(totalMortgage);
                     document.getElementById('replacement-totalAssets').textContent = formatCurrency(totalAssetValue);
-                    window.calculatorData = {{property_id: propertyId, property_address: "{property_data.property_address if property_data else 'Unknown'}", purchase_price: purchasePrice, mortgage_payoff: mortgagePayoff, current_value: currentValue, cost_to_sell_pct: validateCostToSell()}};
+                    window.calculatorData = {{property_id: propertyId, property_address: "{address_display if address_display else 'Unknown Property'}", purchase_price: purchasePrice, mortgage_payoff: mortgagePayoff, current_value: currentValue, cost_to_sell_pct: validateCostToSell()}};
                 }}
 
                 Object.values(inputs).forEach(input => {{ input.addEventListener('input', calculate); input.addEventListener('change', calculate); }});
@@ -320,31 +330,108 @@ async def export_pdf(request):
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#2557FF'), spaceAfter=12, alignment=1)
     heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor('#10295f'), spaceAfter=8, spaceBefore=8)
 
+    def result_table(rows, highlight_last=True):
+        """Build a two-column result table styled like sell_table below."""
+        table = Table(rows, colWidths=[3.5*inch, 1.5*inch])
+        style = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2557FF')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]
+        if highlight_last:
+            style.append(('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8ebf5')))
+        table.setStyle(TableStyle(style))
+        return table
+
     story = []
     story.append(Paragraph("1031 Exchange Calculator Report", title_style))
-    story.append(Paragraph(f"Property: {property_address} (Property ID: {property_id})", styles['Normal']))
+    story.append(Paragraph(f"Address: {property_address}", styles['Normal']))
+    story.append(Paragraph(f"Property ID: {property_id}", styles['Normal']))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     story.append(Spacer(1, 0.2*inch))
 
+    # --- Property Information (mirrors the input fields on the page) ---
     story.append(Paragraph("Property Information", heading_style))
-    prop_data = [['Purchase Price', f"${purchase_price:,.0f}"], ['Current Market Value', f"${current_value:,.0f}"], ['Mortgage Balance', f"${mortgage_payoff:,.0f}"], ['Cost to Sell', f"{cost_to_sell_pct*100:.1f}%"]]
+    prop_data = [
+        ['Purchase Price', f"${purchase_price:,.0f}"],
+        ['Estimated Mortgage Pay Off', f"${mortgage_payoff:,.0f}"],
+        ['Current Value', f"${current_value:,.0f}"],
+        ['Cost to Sell', f"{cost_to_sell_pct*100:.1f}%"],
+    ]
     story.append(Table(prop_data, colWidths=[3*inch, 2*inch]))
     story.append(Spacer(1, 0.2*inch))
 
+    # --- Scenario 1: If You Sell (mirrors the page's Scenario 1 panel) ---
     sell_costs = cost_to_sell_pct * current_value
     gain = current_value - purchase_price
     gains_tax = 0.2 * gain
     net_to_reinvest_sell = current_value - sell_costs - gains_tax - mortgage_payoff
 
     story.append(Paragraph("Scenario 1: If You Sell", heading_style))
-    sell_data = [['', 'Amount'], ['Current Value', f"${current_value:,.0f}"], ['Less: Sale Costs', f"-${sell_costs:,.0f}"], ['Less: Capital Gains Tax (20%)', f"-${gains_tax:,.0f}"], ['Less: Mortgage Payoff', f"-${mortgage_payoff:,.0f}"], ['Net to Reinvest', f"${net_to_reinvest_sell:,.0f}"]]
-
-    sell_table = Table(sell_data, colWidths=[3.5*inch, 1.5*inch])
-    sell_table.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2557FF')), ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke), ('ALIGN', (0, 0), (-1, -1), 'LEFT'), ('ALIGN', (1, 0), (1, -1), 'RIGHT'), ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'), ('FONTSIZE', (0, 0), (-1, 0), 11), ('BOTTOMPADDING', (0, 0), (-1, 0), 12), ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8ebf5')), ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'), ('GRID', (0, 0), (-1, -1), 1, colors.black)]))
-    story.append(sell_table)
+    sell_data = [
+        ['', 'Amount'],
+        ['Current Value', f"${current_value:,.0f}"],
+        ['Less: Sale Costs', f"-${sell_costs:,.0f}"],
+        ['Less: Capital Gains Tax (20%)', f"-${gains_tax:,.0f}"],
+        ['Less: Mortgage Payoff', f"-${mortgage_payoff:,.0f}"],
+        ['Net to Reinvest', f"${net_to_reinvest_sell:,.0f}"],
+    ]
+    story.append(result_table(sell_data))
+    story.append(Spacer(1, 0.1*inch))
+    story.append(Paragraph(
+        "Note: This assumes a 20% capital gains tax rate on the gain between purchase price "
+        "and current value. Your actual tax liability may vary.",
+        styles['Normal'],
+    ))
     story.append(Spacer(1, 0.3*inch))
 
-    story.append(Spacer(1, 0.2*inch))
+    # --- Scenario 2: 1031 Exchange (mirrors the page's Scenario 2 panel) ---
+    # These mirror the same formulas as the calculate() JS function on the
+    # page, recomputed here from the posted purchase_price/mortgage_payoff/
+    # current_value/cost_to_sell_pct so the PDF matches what's on screen.
+    exchange_sale_costs = cost_to_sell_pct * current_value
+    net_cash_from_sale = current_value - exchange_sale_costs - mortgage_payoff
+    example_property_price = 400000
+    downpayment_per_property = 0.30 * example_property_price
+    num_properties = int(net_cash_from_sale // downpayment_per_property)
+    total_mortgage = (example_property_price - downpayment_per_property) * num_properties
+    total_asset_value = num_properties * example_property_price
+
+    story.append(Paragraph("Scenario 2: 1031 Exchange", heading_style))
+    exchange_data = [
+        ['', 'Amount'],
+        ['Current Value', f"${current_value:,.0f}"],
+        ['Less: Sale Costs', f"-${exchange_sale_costs:,.0f}"],
+        ['Less: Mortgage Payoff', f"-${mortgage_payoff:,.0f}"],
+        ['Net Cash Available', f"${net_cash_from_sale:,.0f}"],
+    ]
+    story.append(result_table(exchange_data))
+    story.append(Spacer(1, 0.15*inch))
+
+    story.append(Paragraph("Replacement Properties (Example)", heading_style))
+    replacement_data = [
+        ['', 'Amount'],
+        ['Example Price Per Property', f"${example_property_price:,.0f}"],
+        ['Down Payment (30% each)', f"${downpayment_per_property:,.0f}"],
+        ['Number of Properties', f"{num_properties}"],
+        ['Total Mortgage (All Properties)', f"${total_mortgage:,.0f}"],
+        ['Total Asset Value', f"${total_asset_value:,.0f}"],
+    ]
+    story.append(result_table(replacement_data))
+    story.append(Spacer(1, 0.1*inch))
+    story.append(Paragraph(
+        "Note: Capital gains tax is deferred in a 1031 exchange. You must reinvest the sale "
+        "proceeds within specified timeframes.",
+        styles['Normal'],
+    ))
+    story.append(Spacer(1, 0.3*inch))
+
     story.append(Paragraph("<b>License and Disclaimer:</b> By choosing to use this tool and/or information, you are agreeing to the terms on the <a href='https://fernwood.team/policies-fees-license-and-disclaimer/'>license page</a>.", styles['Normal']))
 
     doc.build(story)

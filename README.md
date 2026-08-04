@@ -61,10 +61,10 @@ The app uses SQLite. Database file is created automatically in the current direc
 
 ### Tables
 
-- **properties** — Property data: `property_id` (county APN, primary key), `sale_price` (→ Purchase Price), `sale_date` (reference only, not used in the calculator), `current_home_value` (→ Current Value), plus mortgage/address/property-detail fields for future use.
+- **properties** — Property data: `property_id` (county APN, primary key), `sale_price` (→ Purchase Price), `sale_date` (reference only, not used in the calculator), `current_home_value` (→ Current Value), `property_address` / `city` / `zip_code` (shown at the top of the calculator page when present), plus mortgage/property-detail fields.
 - **access_logs** — Track calculator usage by `property_id`.
 
-`Mortgage Pay Off` and `Cost to Sell (%)` are fixed calculator defaults ($0 and 6% respectively) — they are not pulled from the database. Mortgage Pay Off defaults to $0 by leaving `first_mortgage_amt` / `mortgage_rate` / `mortgage_date` unset for imported properties. Note: `calculator()` in `app.py` currently hardcodes Mortgage Pay Off to $0 regardless of what's in these columns -- populating them (e.g. via `--estimate-mortgage`, below) has no visible effect on the live calculator unless `app.py` is also changed to read from them.
+`Cost to Sell (%)` is a fixed calculator default (6%) — it is not pulled from the database. `Estimated Mortgage Pay Off` is computed from `first_mortgage_amt` / `mortgage_rate` / `mortgage_date` via `calculate_mortgage_payoff()` in `app.py`; it shows $0 when those fields are empty (see `--estimate-mortgage`, below, to fill them).
 
 ### Updating the database
 
@@ -73,7 +73,7 @@ cd ~/Dropbox/ClaudeDocs/Projects/multifamilyCampaign/fastHTML
 python import_properties.py /path/to/cleaned_scrapedData.xlsx --sheet "MLS Data"
 ```
 
-This upserts by Property ID (inserts new ones, updates existing ones) from a spreadsheet with `Property ID`, `Sale Price`, `Sale Date`, and `Current Value` columns. Add `--dry-run` to preview counts without writing. After running it, commit and push `properties.db` to deploy the refresh to Railway (each redeploy resets `access_logs`, since Railway's disk isn't persistent across deploys).
+This upserts by Property ID (inserts new ones, updates existing ones) from a spreadsheet with `Property ID`, `Sale Price`, `Sale Date`, and `Current Value` columns. If the sheet also has `Address`, `Property City`, and/or `Prop Zip` columns, those are imported too and displayed at the top of the calculator page (e.g. "4419 Spencer ST, Las Vegas 89119") -- they're optional, so a sheet without them still imports fine. Add `--dry-run` to preview counts without writing. After running it, commit and push `properties.db` to deploy the refresh to Railway (each redeploy resets `access_logs`, since Railway's disk isn't persistent across deploys).
 
 #### Estimating mortgage payoff data
 
@@ -89,7 +89,7 @@ python import_properties.py /path/to/cleaned_scrapedData.xlsx --estimate-mortgag
 
 - All HTML generation is in the `calculator()` function in `app.py`
 - JavaScript calculations remain client-side (no changes needed — complex enough to warrant keeping it)
-- PDF export uses ReportLab (same as Flask version)
+- PDF export uses ReportLab (same as Flask version) and mirrors everything on the page: Address, Property Information, Scenario 1 (If You Sell), and Scenario 2 (1031 Exchange + Replacement Properties). The Scenario 2 figures are recomputed server-side from the same inputs, using the same formulas as the page's `calculate()` JS function.
 - Database models use SQLAlchemy ORM directly (no Flask-SQLAlchemy wrapper)
 - The session factory uses `expire_on_commit=False` — without it, logging an access (`session.commit()`) expires the `Property` object's attributes, and reading them again after `session.close()` raises `DetachedInstanceError`. This was live-crashing every successful property lookup before this fix.
 
