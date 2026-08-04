@@ -6,9 +6,16 @@ Reads an .xlsx file with 'Property ID', 'Sale Price', 'Sale Date', and
 new Property IDs are inserted, existing ones are updated in place. Run this
 locally, then commit + push properties.db to deploy the refresh to Railway.
 
+By default, rows removed from the spreadsheet are left alone in the database.
+Pass --sync to also delete any property whose Property ID is no longer in
+the spreadsheet -- use this when properties have been intentionally dropped
+from the mailing list (e.g. bad data, bulk-sale price outliers) and should
+stop being reachable via the calculator.
+
 Usage:
     python import_properties.py /path/to/scrapedData_20260730_multifamily.xlsx
     python import_properties.py data.xlsx --sheet "MLS Data" --dry-run
+    python import_properties.py data.xlsx --sync
 """
 
 import argparse
@@ -147,12 +154,46 @@ def upsert_properties(rows: list[dict], dry_run: bool) -> tuple[int, int, int]:
     return inserted, updated, skipped
 
 
+def sync_delete(current_ids: set[str], dry_run: bool) -> int:
+    """Delete properties whose Property ID is no longer in the spreadsheet.
+
+    Args:
+        current_ids: Property IDs present in the current spreadsheet.
+        dry_run: If True, count matches but don't delete.
+
+    Returns:
+        The number of properties removed (or that would be removed).
+    """
+    session = get_session()
+    try:
+        stale = session.query(Property).filter(~Property.property_id.in_(current_ids)).all()
+        removed_ids = [p.property_id for p in stale]
+        for prop in stale:
+            session.delete(prop)
+
+        if dry_run:
+            session.rollback()
+        else:
+            session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+    if removed_ids:
+        print(f"  Removed: {', '.join(removed_ids)}")
+    return len(removed_ids)
+
+
 def main() -> None:
     """Parse arguments, run the import, and print a summary."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xlsx_path", type=Path, help="Path to the cleaned MLS .xlsx file")
     parser.add_argument("--sheet", default=None, help="Sheet name (default: active sheet)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and report without writing")
+    parser.add_argument("--sync", action="store_true",
+                         help="Also delete properties no longer in the spreadsheet")
     args = parser.parse_args()
 
     if not args.xlsx_path.exists():
@@ -164,6 +205,11 @@ def main() -> None:
 
     inserted, updated, skipped = upsert_properties(rows, args.dry_run)
 
+    removed = 0
+    if args.sync:
+        current_ids = {str(row["Property ID"]).strip() for row in rows if row["Property ID"]}
+        removed = sync_delete(current_ids, args.dry_run)
+
     session = get_session()
     try:
         total = session.query(Property).count()
@@ -171,7 +217,7 @@ def main() -> None:
         session.close()
 
     mode = " (dry run, nothing written)" if args.dry_run else ""
-    print(f"Inserted: {inserted}  Updated: {updated}  Skipped (no Property ID): {skipped}{mode}")
+    print(f"Inserted: {inserted}  Updated: {updated}  Skipped (no Property ID): {skipped}  Removed: {removed}{mode}")
     print(f"Total properties in database: {total}")
     if total > MAX_ROWS:
         print(f"  Warning: exceeds the expected max of {MAX_ROWS} rows.", file=sys.stderr)
