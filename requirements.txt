@@ -2,3 +2,4 @@ git+https://github.com/AnswerDotAI/fasthtml.git
 uvicorn>=0.30
 sqlalchemy>=2.0
 reportlab>=4.0
+openpyxl>=3.1

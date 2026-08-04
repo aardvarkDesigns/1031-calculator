@@ -52,34 +52,32 @@ def calculate_mortgage_payoff(original_amount, annual_rate, mortgage_date, month
 
 @rt('/')
 def calculator(request):
-    """Main calculator page - looks up property by APN."""
-    apn = request.query_params.get('apn', '').strip() if request.query_params else ''
+    """Main calculator page - looks up property by Property ID (?ID=...)."""
+    property_id = ''
+    if request.query_params:
+        property_id = (request.query_params.get('ID') or request.query_params.get('id') or '').strip()
     property_data = None
-    calculated_mortgage = 200000
+    # Mortgage Pay Off is a fixed constant of $0 per business requirement
+    # (postcard-driven properties have no mortgage data to compute a real payoff).
+    calculated_mortgage = 0
     error_message = None
 
-    if apn:
+    if property_id:
         session = get_session()
-        property_data = session.query(Property).filter_by(apn=apn).first()
+        property_data = session.query(Property).filter_by(property_id=property_id).first()
 
         if not property_data:
-            error_message = f"Property with APN {apn} not found in database."
+            error_message = f"Property with ID {property_id} not found in database."
         else:
-            calculated_mortgage = calculate_mortgage_payoff(
-                property_data.first_mortgage_amt,
-                property_data.mortgage_rate,
-                property_data.mortgage_date
-            )
-
             # Log this access
-            log = AccessLog(apn=apn)
+            log = AccessLog(property_id=property_id)
             session.add(log)
             session.commit()
 
         session.close()
 
-    purchase_price = property_data.sale_price if property_data else 470000
-    current_value = property_data.current_home_value if property_data else 621000
+    purchase_price = property_data.sale_price if property_data and property_data.sale_price else 470000
+    current_value = property_data.current_home_value if property_data and property_data.current_home_value else 621000
     current_year = datetime.now().year
 
     return Html(
@@ -143,7 +141,7 @@ def calculator(request):
                 Div(
                     (Div(Strong("⚠️ Notice:"), " ", error_message, cls="error-message") if error_message else ""),
                     (Div(
-                        P(Strong("APN:"), " ", property_data.apn),
+                        P(Strong("Property ID:"), " ", property_data.property_id),
                         P(Strong("Address:"), " ", property_data.property_address, ", ", property_data.city, ", ", property_data.zip_code),
                         P(Strong("Year Built:"), " ", property_data.year_built, " | ", Strong("Beds:"), " ", property_data.bedrooms, " | ", Strong("Baths:"), " ", property_data.bathrooms),
                         cls="property-info"
@@ -208,7 +206,7 @@ def calculator(request):
             ),
             Script(f"""
                 const inputs = {{purchasePrice: document.getElementById('purchasePrice'), mortgagePayoff: document.getElementById('mortgagePayoff'), currentValue: document.getElementById('currentValue'), costToSell: document.getElementById('costToSell')}};
-                const apn = "{apn}";
+                const propertyId = "{property_id}";
                 const sessionStartTime = Date.now();
 
                 function formatCurrency(value) {{return new Intl.NumberFormat('en-US', {{style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0}}).format(value);}}
@@ -260,7 +258,7 @@ def calculator(request):
                     document.getElementById('replacement-count').textContent = numProperties.toString();
                     document.getElementById('replacement-totalMortgage').textContent = formatCurrency(totalMortgage);
                     document.getElementById('replacement-totalAssets').textContent = formatCurrency(totalAssetValue);
-                    window.calculatorData = {{apn: apn, property_address: "{property_data.property_address if property_data else 'Unknown'}", purchase_price: purchasePrice, mortgage_payoff: mortgagePayoff, current_value: currentValue, cost_to_sell_pct: validateCostToSell()}};
+                    window.calculatorData = {{property_id: propertyId, property_address: "{property_data.property_address if property_data else 'Unknown'}", purchase_price: purchasePrice, mortgage_payoff: mortgagePayoff, current_value: currentValue, cost_to_sell_pct: validateCostToSell()}};
                 }}
 
                 Object.values(inputs).forEach(input => {{ input.addEventListener('input', calculate); input.addEventListener('change', calculate); }});
@@ -268,20 +266,20 @@ def calculator(request):
                 document.getElementById('calculateButton').addEventListener('click', calculate);
 
                 const exportButton = document.getElementById('exportPdfButton');
-                if (exportButton) {{ exportButton.addEventListener('click', async () => {{ calculate(); if (!apn) {{ alert('Cannot export: No property data available'); return; }} exportButton.disabled = true; exportButton.textContent = 'Generating PDF...'; try {{ const response = await fetch('/api/export-pdf', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(window.calculatorData) }}); if (response.ok) {{ const blob = await response.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `1031-calculator-${{apn}}.pdf`; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); }} else {{ alert('Error generating PDF'); }} }} catch (error) {{ console.error('PDF export error:', error); alert('Error exporting PDF'); }} finally {{ exportButton.disabled = false; exportButton.textContent = 'Download PDF Report'; }} }}); }}
+                if (exportButton) {{ exportButton.addEventListener('click', async () => {{ calculate(); if (!propertyId) {{ alert('Cannot export: No property data available'); return; }} exportButton.disabled = true; exportButton.textContent = 'Generating PDF...'; try {{ const response = await fetch('/api/export-pdf', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(window.calculatorData) }}); if (response.ok) {{ const blob = await response.blob(); const url = window.URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `1031-calculator-${{propertyId}}.pdf`; document.body.appendChild(a); a.click(); window.URL.revokeObjectURL(url); document.body.removeChild(a); }} else {{ alert('Error generating PDF'); }} }} catch (error) {{ console.error('PDF export error:', error); alert('Error exporting PDF'); }} finally {{ exportButton.disabled = false; exportButton.textContent = 'Download PDF Report'; }} }}); }}
 
-                window.addEventListener('beforeunload', () => {{ if (apn) {{ const durationSeconds = Math.round((Date.now() - sessionStartTime) / 1000); navigator.sendBeacon('/api/log-session', JSON.stringify({{apn: apn, duration_seconds: durationSeconds}})); }} }});
+                window.addEventListener('beforeunload', () => {{ if (propertyId) {{ const durationSeconds = Math.round((Date.now() - sessionStartTime) / 1000); navigator.sendBeacon('/api/log-session', JSON.stringify({{property_id: propertyId, duration_seconds: durationSeconds}})); }} }});
                 calculate();
             """)
         )
     )
 
 
-@rt('/api/property/{apn}')
-def get_property_api(apn: str):
+@rt('/api/property/{property_id}')
+def get_property_api(property_id: str):
     """API endpoint to fetch property details."""
     session = get_session()
-    prop = session.query(Property).filter_by(apn=apn).first()
+    prop = session.query(Property).filter_by(property_id=property_id).first()
     session.close()
 
     if not prop:
@@ -289,7 +287,7 @@ def get_property_api(apn: str):
 
     mortgage_payoff = calculate_mortgage_payoff(prop.first_mortgage_amt, prop.mortgage_rate, prop.mortgage_date)
 
-    return {'apn': prop.apn, 'property_address': prop.property_address, 'city': prop.city, 'zip_code': prop.zip_code, 'sale_price': prop.sale_price, 'current_home_value': prop.current_home_value, 'mortgage_payoff': mortgage_payoff, 'year_built': prop.year_built, 'bedrooms': prop.bedrooms, 'bathrooms': prop.bathrooms}
+    return {'property_id': prop.property_id, 'property_address': prop.property_address, 'city': prop.city, 'zip_code': prop.zip_code, 'sale_price': prop.sale_price, 'sale_date': prop.sale_date.isoformat() if prop.sale_date else None, 'current_home_value': prop.current_home_value, 'mortgage_payoff': mortgage_payoff, 'year_built': prop.year_built, 'bedrooms': prop.bedrooms, 'bathrooms': prop.bathrooms}
 
 
 @rt('/api/export-pdf', methods=['POST'])
@@ -297,7 +295,7 @@ async def export_pdf(request):
     """Generate and download PDF of calculator results."""
     data = await request.json()
 
-    apn = data.get('apn', 'N/A')
+    property_id = data.get('property_id', 'N/A')
     property_address = data.get('property_address', 'Unknown Property')
     purchase_price = float(data.get('purchase_price', 0))
     mortgage_payoff = float(data.get('mortgage_payoff', 0))
@@ -313,7 +311,7 @@ async def export_pdf(request):
 
     story = []
     story.append(Paragraph("1031 Exchange Calculator Report", title_style))
-    story.append(Paragraph(f"Property: {property_address} (APN: {apn})", styles['Normal']))
+    story.append(Paragraph(f"Property: {property_address} (Property ID: {property_id})", styles['Normal']))
     story.append(Paragraph(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     story.append(Spacer(1, 0.2*inch))
 
@@ -341,19 +339,19 @@ async def export_pdf(request):
     doc.build(story)
     pdf_buffer.seek(0)
 
-    return FileResponse(pdf_buffer, media_type='application/pdf', filename=f'1031-calculator-{apn}-{datetime.now().strftime("%Y%m%d")}.pdf')
+    return FileResponse(pdf_buffer, media_type='application/pdf', filename=f'1031-calculator-{property_id}-{datetime.now().strftime("%Y%m%d")}.pdf')
 
 
 @rt('/api/log-session', methods=['POST'])
 async def log_session(request):
-    """Log session duration for an APN."""
+    """Log session duration for a Property ID."""
     data = await request.json()
-    apn = data.get('apn')
+    property_id = data.get('property_id')
     duration = data.get('duration_seconds', 0)
 
-    if apn:
+    if property_id:
         session = get_session()
-        log = session.query(AccessLog).filter_by(apn=apn).order_by(AccessLog.accessed_at.desc()).first()
+        log = session.query(AccessLog).filter_by(property_id=property_id).order_by(AccessLog.accessed_at.desc()).first()
         if log:
             log.session_duration_seconds = duration
             session.commit()

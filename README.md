@@ -40,16 +40,18 @@ Server runs at `http://127.0.0.1:5000`
 
 ```
 fastHTML/
-├── app.py           # Main FastHTML application with all routes
-├── models.py        # SQLAlchemy database models (Property, AccessLog)
-├── requirements.txt # Python dependencies
-└── README.md        # This file
+├── app.py                 # Main FastHTML application with all routes
+├── models.py               # SQLAlchemy database models (Property, AccessLog)
+├── import_properties.py    # Load/refresh properties.db from a cleaned MLS spreadsheet
+├── requirements.txt        # Python dependencies
+├── Procfile                # Railway start command
+└── README.md                # This file
 ```
 
 ## API Endpoints
 
-- `GET /` — Main calculator page (optionally pass `?apn=xxxxx` to look up a property)
-- `GET /api/property/<apn>` — Fetch property details as JSON
+- `GET /` — Main calculator page (pass `?ID=xxxxx` to look up a property by Property ID / APN)
+- `GET /api/property/<property_id>` — Fetch property details as JSON
 - `POST /api/export-pdf` — Generate and download PDF report
 - `POST /api/log-session` — Log session duration
 
@@ -59,15 +61,27 @@ The app uses SQLite. Database file is created automatically in the current direc
 
 ### Tables
 
-- **properties** — Property data with mortgage and valuation info
-- **access_logs** — Track calculator usage by APN
+- **properties** — Property data: `property_id` (county APN, primary key), `sale_price` (→ Purchase Price), `sale_date` (reference only, not used in the calculator), `current_home_value` (→ Current Value), plus mortgage/address/property-detail fields for future use.
+- **access_logs** — Track calculator usage by `property_id`.
+
+`Mortgage Pay Off` and `Cost to Sell (%)` are fixed calculator defaults ($0 and 6% respectively) — they are not pulled from the database. Mortgage Pay Off defaults to $0 by leaving `first_mortgage_amt` / `mortgage_rate` / `mortgage_date` unset for imported properties.
+
+### Updating the database
+
+```bash
+cd ~/Dropbox/ClaudeDocs/Projects/multifamilyCampaign/fastHTML
+python import_properties.py /path/to/cleaned_scrapedData.xlsx --sheet "MLS Data"
+```
+
+This upserts by Property ID (inserts new ones, updates existing ones) from a spreadsheet with `Property ID`, `Sale Price`, `Sale Date`, and `Current Value` columns. Add `--dry-run` to preview counts without writing. After running it, commit and push `properties.db` to deploy the refresh to Railway (each redeploy resets `access_logs`, since Railway's disk isn't persistent across deploys).
 
 ## Notes
 
-- All HTML generation is in the `calculator_page()` function in `app.py`
+- All HTML generation is in the `calculator()` function in `app.py`
 - JavaScript calculations remain client-side (no changes needed — complex enough to warrant keeping it)
 - PDF export uses ReportLab (same as Flask version)
 - Database models use SQLAlchemy ORM directly (no Flask-SQLAlchemy wrapper)
+- The session factory uses `expire_on_commit=False` — without it, logging an access (`session.commit()`) expires the `Property` object's attributes, and reading them again after `session.close()` raises `DetachedInstanceError`. This was live-crashing every successful property lookup before this fix.
 
 ## Differences from Flask Version
 
@@ -78,4 +92,4 @@ The app uses SQLite. Database file is created automatically in the current direc
 
 ## Testing
 
-To test with sample data, you'll need to populate the `properties` table first. Use a tool like DB Browser for SQLite or add a data loading script.
+Populate `properties.db` with `python import_properties.py <spreadsheet.xlsx>`, then run the app and visit `http://127.0.0.1:5000/?ID=<a property ID from the spreadsheet>`.
