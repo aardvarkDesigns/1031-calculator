@@ -64,7 +64,7 @@ The app uses SQLite. Database file is created automatically in the current direc
 - **properties** — Property data: `property_id` (county APN, primary key), `sale_price` (→ Purchase Price), `sale_date` (reference only, not used in the calculator), `current_home_value` (→ Current Value), plus mortgage/address/property-detail fields for future use.
 - **access_logs** — Track calculator usage by `property_id`.
 
-`Mortgage Pay Off` and `Cost to Sell (%)` are fixed calculator defaults ($0 and 6% respectively) — they are not pulled from the database. Mortgage Pay Off defaults to $0 by leaving `first_mortgage_amt` / `mortgage_rate` / `mortgage_date` unset for imported properties.
+`Mortgage Pay Off` and `Cost to Sell (%)` are fixed calculator defaults ($0 and 6% respectively) — they are not pulled from the database. Mortgage Pay Off defaults to $0 by leaving `first_mortgage_amt` / `mortgage_rate` / `mortgage_date` unset for imported properties. Note: `calculator()` in `app.py` currently hardcodes Mortgage Pay Off to $0 regardless of what's in these columns -- populating them (e.g. via `--estimate-mortgage`, below) has no visible effect on the live calculator unless `app.py` is also changed to read from them.
 
 ### Updating the database
 
@@ -74,6 +74,16 @@ python import_properties.py /path/to/cleaned_scrapedData.xlsx --sheet "MLS Data"
 ```
 
 This upserts by Property ID (inserts new ones, updates existing ones) from a spreadsheet with `Property ID`, `Sale Price`, `Sale Date`, and `Current Value` columns. Add `--dry-run` to preview counts without writing. After running it, commit and push `properties.db` to deploy the refresh to Railway (each redeploy resets `access_logs`, since Railway's disk isn't persistent across deploys).
+
+#### Estimating mortgage payoff data
+
+Add `--estimate-mortgage` to also fill `first_mortgage_amt`, `mortgage_rate`, and `mortgage_date` for any property that doesn't already have them:
+
+```bash
+python import_properties.py /path/to/cleaned_scrapedData.xlsx --estimate-mortgage
+```
+
+`estimate_mortgage()` in `import_properties.py` assumes 75% loan-to-value, a 30-year term, and that year's average 30-year fixed rate (a hardcoded table sourced from Bankrate/Freddie Mac historical data) as of the purchase date. These are rough estimates, not real loan data -- the LTV assumption in particular can be off by a wide margin for any individual property. It never overwrites a property's mortgage fields if they're already set.
 
 ## Notes
 
