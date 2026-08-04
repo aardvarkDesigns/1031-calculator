@@ -337,9 +337,19 @@ async def export_pdf(request):
     story.append(Paragraph("<b>License and Disclaimer:</b> By choosing to use this tool and/or information, you are agreeing to the terms on the <a href='https://fernwood.team/policies-fees-license-and-disclaimer/'>license page</a>.", styles['Normal']))
 
     doc.build(story)
-    pdf_buffer.seek(0)
+    pdf_bytes = pdf_buffer.getvalue()
+    filename = f'1031-calculator-{property_id}-{datetime.now().strftime("%Y%m%d")}.pdf'
 
-    return FileResponse(pdf_buffer, media_type='application/pdf', filename=f'1031-calculator-{property_id}-{datetime.now().strftime("%Y%m%d")}.pdf')
+    # FileResponse requires a real path on disk and can't serve an in-memory
+    # buffer -- it 404s with "path should be string, bytes, os.PathLike or
+    # integer, not BytesIO" the moment it checks os.path.exists(). Response
+    # with an explicit Content-Disposition header serves the in-memory PDF
+    # directly, with no temp file needed.
+    return Response(
+        content=pdf_bytes,
+        media_type='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
 
 
 @rt('/api/log-session', methods=['POST'])
