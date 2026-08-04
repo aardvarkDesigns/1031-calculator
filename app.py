@@ -95,9 +95,6 @@ def calculator(request):
                 .header p { font-size: 16px; font-weight: 400; opacity: 0.95; }
                 .content { padding: 40px 30px; }
                 .error-message { background: #fee2e2; border: 2px solid #fca5a5; border-left: 5px solid #dc2626; color: #991b1b; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
-                .property-info { background: #ecf2ff; border: 2px solid #bfdbfe; border-left: 5px solid #2557FF; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
-                .property-info p { margin: 5px 0; font-size: 14px; }
-                .property-info strong { color: #10295f; }
                 .input-section { background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 8px; padding: 30px; margin-bottom: 40px; border-left: 5px solid #2557FF; }
                 .input-section h2 { font-size: 20px; font-weight: 600; color: #10295f; margin-bottom: 20px; }
                 .input-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px; }
@@ -140,12 +137,6 @@ def calculator(request):
                 ),
                 Div(
                     (Div(Strong("⚠️ Notice:"), " ", error_message, cls="error-message") if error_message else ""),
-                    (Div(
-                        P(Strong("Property ID:"), " ", property_data.property_id),
-                        P(Strong("Address:"), " ", property_data.property_address, ", ", property_data.city, ", ", property_data.zip_code),
-                        P(Strong("Year Built:"), " ", property_data.year_built, " | ", Strong("Beds:"), " ", property_data.bedrooms, " | ", Strong("Baths:"), " ", property_data.bathrooms),
-                        cls="property-info"
-                    ) if property_data else ""),
 
                     Div(
                         H2("Property Information"),
