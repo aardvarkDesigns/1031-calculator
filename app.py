@@ -100,6 +100,12 @@ def calculator(request):
     current_value = property_data.current_home_value if property_data and property_data.current_home_value else 621000
     current_year = datetime.now().year
 
+    # Show the purchase (sale) date next to the Purchase Price label, e.g.
+    # "Purchase Price (01/12/2022)", when it's on file.
+    purchase_price_label = "Purchase Price"
+    if property_data and property_data.sale_date:
+        purchase_price_label = f"Purchase Price ({property_data.sale_date.strftime('%m/%d/%Y')})"
+
     # Combine street address with city/zip when available, e.g.
     # "4419 Spencer ST, Las Vegas 89119". Any of the three parts may be
     # missing on older data, so build it up from whatever's on file.
@@ -171,7 +177,7 @@ def calculator(request):
                     Div(
                         H2("Property Information"),
                         Div(
-                            Div(Label("Purchase Price", for_="purchasePrice"), Input(type="number", id="purchasePrice", value=purchase_price, step="1000"), Span("Original price paid for property", cls="help-text"), cls="input-group"),
+                            Div(Label(purchase_price_label, for_="purchasePrice"), Input(type="number", id="purchasePrice", value=purchase_price, step="1000"), Span("Original price paid for property", cls="help-text"), cls="input-group"),
                             Div(Label("Estimated Mortgage Pay Off", for_="mortgagePayoff"), Input(type="number", id="mortgagePayoff", value=calculated_mortgage, step="1000"), Span("Outstanding loan balance", cls="help-text"), cls="input-group"),
                             Div(Label("Current Value", for_="currentValue"), Input(type="number", id="currentValue", value=current_value, step="1000"), Span("Today's market value", cls="help-text"), cls="input-group"),
                             Div(Label("Cost to Sell (%)", for_="costToSell"), Input(type="number", id="costToSell", value="6", step="0.5", min="0", max="50"), Span("", id="costToSellError", cls="help-text"), cls="input-group"),
