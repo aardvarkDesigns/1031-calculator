@@ -433,7 +433,9 @@ async def export_pdf(request):
     story.append(Spacer(1, 0.1*inch))
     story.append(Paragraph(
         "Note: Capital gains tax is deferred in a 1031 exchange. You must reinvest the sale "
-        "proceeds within specified timeframes.",
+        "proceeds within specified timeframes and comply with all 1031 regulations. For a "
+        "checklist of the requirements, see "
+        "<a href='https://fernwood.team/1031-exchange-risk-reduction-checklist/'>this page</a>.",
         styles['Normal'],
     ))
     story.append(Spacer(1, 0.3*inch))
