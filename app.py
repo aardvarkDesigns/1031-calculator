@@ -217,7 +217,7 @@ def calculator(request):
                                 Div(Span("Total Asset Value", cls="result-label"), Span("$0", id="replacement-totalAssets", cls="result-value"), cls="result-row highlight subtotal"),
                                 cls="replacement-section"
                             ),
-                            Div(Strong("Note:"), " Capital gains tax is deferred in a 1031 exchange. You must reinvest the sale proceeds within specified timeframes.", cls="note"),
+                            Div(Strong("Note:"), " Capital gains tax is deferred in a 1031 exchange. You must reinvest the sale proceeds within specified timeframes and comply with all 1031 regulations. For a checklist of the requirements, see ", A("this page", href="https://fernwood.team/1031-exchange-risk-reduction-checklist/", target="_blank"), ".", cls="note"),
                             cls="scenario exchange"
                         ),
                         cls="results-section"
